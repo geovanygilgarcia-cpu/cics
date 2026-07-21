@@ -7,6 +7,7 @@ import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
 import org.apache.pdfbox.pdmodel.interactive.form.PDField;
+import org.apache.pdfbox.pdmodel.interactive.form.PDTextField;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
@@ -19,7 +20,7 @@ import java.io.InputStream;
 @RequiredArgsConstructor
 public class RecetaMedicaAcroFormService  {
 
-    private static final String TEMPLATE_PATH = "templates/receta_editable.pdf";
+    private static final String TEMPLATE_PATH = "templates/receta_editable_2.pdf";
 
     public byte[] llenarFormulario(RecetaDTO recetaDTO) {
         try (InputStream templateStream = new ClassPathResource(TEMPLATE_PATH).getInputStream();
@@ -54,7 +55,12 @@ public class RecetaMedicaAcroFormService  {
                 setField(acroForm, "alergias", sv.alergias());
             }
 
-            setField(acroForm, "idx", recetaDTO.diagnosticoTratamiento());
+            setField(acroForm, "idx", recetaDTO.idx());
+
+            // Aseguramos que el campo acepte multilínea antes de llenarlo
+            asegurarMultilinea(acroForm, "tratamiento");
+            setField(acroForm, "tratamiento", formatearMedicamentos(recetaDTO.diagnosticoTratamiento()));
+
             setField(acroForm, "proxima_cita", recetaDTO.proximaCita());
 
             acroForm.flatten();
@@ -79,6 +85,49 @@ public class RecetaMedicaAcroFormService  {
             }
         } catch (IOException e) {
             log.error("Error al asignar valor al campo '{}'", fieldName, e);
+        }
+    }
+
+    /**
+     * Convierte el string de diagnosticoTratamiento (donde cada '\n'
+     * representa un medicamento/tratamiento distinto) en una lista
+     * numerada lista para mostrarse en el campo multilínea del PDF.
+     */
+    private String formatearMedicamentos(String diagnosticoTratamiento) {
+        if (diagnosticoTratamiento == null || diagnosticoTratamiento.isBlank()) {
+            return "";
+        }
+
+        String[] lineas = diagnosticoTratamiento.split("\\r?\\n");
+        StringBuilder sb = new StringBuilder();
+
+        int contador = 1;
+        for (String linea : lineas) {
+            String limpio = linea.trim();
+            if (limpio.isEmpty()) continue;
+
+            if (contador > 1) {
+                sb.append(System.lineSeparator()).append(System.lineSeparator()); // <-- línea extra entre medicamentos
+            }
+            sb.append(contador++).append(". ").append(limpio);
+        }
+
+        return sb.toString();
+    }
+
+    /**
+     * Garantiza que el campo sea multilínea; si no lo es, lo activa
+     * en tiempo de ejecución para que los saltos de línea se respeten.
+     */
+    private void asegurarMultilinea(PDAcroForm acroForm, String fieldName) {
+        try {
+            PDField field = acroForm.getField(fieldName);
+            if (field instanceof PDTextField textField && !textField.isMultiline()) {
+                textField.setMultiline(true);
+                log.info("Campo '{}' configurado como multilínea", fieldName);
+            }
+        } catch (Exception e) {
+            log.warn("No se pudo verificar/ajustar multilínea en '{}'", fieldName, e);
         }
     }
 }
